@@ -1,4 +1,4 @@
-
+DROP DATABASE IF EXISTS quanlykhoahoc;
 CREATE DATABASE IF NOT EXISTS QuanLyKhoaHoc;
 /* 2026-04-02 13:26:39 [2 ms] */ 
 USE QuanLyKhoaHoc;
@@ -29,7 +29,7 @@ CREATE TABLE Flash_Card(
     MaFC VARCHAR(20),
     Tu_Vung VARCHAR(255) NOT NULL,
     Mo_Ta VARCHAR(255) NOT NULL,
-    Hinh_Anh VARCHAR(255), --luu link cua anh
+    Hinh_Anh VARCHAR(255), -- luu link cua anh
     Vi_Du VARCHAR(255),
     PRIMARY KEY(MaKH,MaBH,MaFC)
 
@@ -50,8 +50,8 @@ CREATE TABLE Cau_Hoi(
     MaDe VARCHAR(20),
     Noi_Dung TEXT NOT NULL,
     Giai_Thich TEXT NOT NULL,
-    Fill_Am_Thanh VARCHAR(255), --link file am thanh
-    Dap_An VARCHAR(255) NOT NULL, --luu dang ABDCABDD
+    Fill_Am_Thanh VARCHAR(255), -- link file am thanh
+    Dap_An VARCHAR(255) NOT NULL, -- luu dang ABDCABDD
     PRIMARY KEY(MaCH,MaDe)
     
     
@@ -76,7 +76,7 @@ CREATE TABLE Binh_Luan_Blog(
 CREATE TABLE Binh_Luan_De_Thi(
     MaBL VARCHAR(20) PRIMARY KEY,
     MaDe VARCHAR(20),
-    Muc_Do_Kho DECIMAL(3) --luu dang tu 0 den 99 diem kho
+    Muc_Do_Kho DECIMAL(3) -- luu dang tu 0 den 99 diem kho
 
     
 );
@@ -101,7 +101,7 @@ CREATE TABLE Luot_Bai_Lam(
     MaDe VARCHAR(20),
     MaLuot VARCHAR(20),
     MaNguoiLam VARCHAR(20),
-    Diem_So DECIMAL(4),
+    Diem_So DECIMAL(6,2),
     Ngay_Lam DATE,
     Thoi_Gian_Hoan_Thanh TIME,
     PRIMARY KEY(MaDe,MaLuot)
@@ -141,14 +141,14 @@ CREATE TABLE NGUOI_DUNG (
 
 CREATE TABLE HOC_VIEN (
   MaHV VARCHAR(20) PRIMARY KEY,
-  Diem_Tich_Luy INT,
+  Diem_Tich_Luy INT
 
   
 );
 
 CREATE TABLE GIANG_VIEN (
   MaGV VARCHAR(20) PRIMARY KEY,
-  Trinh_Do VARCHAR(50),
+  Trinh_Do VARCHAR(50)
   
   
 );
@@ -326,7 +326,7 @@ FOREIGN KEY (MaGH) REFERENCES GioHang(MaGH)
 ON DELETE CASCADE
 ON UPDATE CASCADE;
 
---them khoa hoc
+-- them khoa hoc
 DELIMITER //
 CREATE PROCEDURE sp_themkhoahoc(
     IN p_makh VARCHAR(20),
@@ -355,7 +355,7 @@ END//
 DELIMITER ;
 
 
---sua khoa hoc
+-- sua khoa hoc
 DELIMITER //
 CREATE Procedure p_suakhoahoc(
     IN p_makh VARCHAR(20),
@@ -386,6 +386,7 @@ END //
 DELIMITER ;
 
 --xoa khoa hoc
+DELIMITER //
 CREATE PROCEDURE p_xoakhoahoc(
     IN p_makh VARCHAR(20)
 )
@@ -393,7 +394,7 @@ BEGIN
     IF EXISTS(SELECT 1 FROM CoQuyen WHERE MaKH=p_makh) THEN
         SIGNAL SQLSTATE '45000'
         SET MESSAGE_TEXT = 'Không thể xóa: khóa học này đã có học viên sở hữu';
-    ELSEIF EXISTS(SELECT 1 FROM KHOA_HOC WHERE MaKh=p_makh) THEN
+    ELSEIF NOT EXISTS(SELECT 1 FROM KHOA_HOC WHERE MaKH=p_makh) THEN
         SIGNAL SQLSTATE '45000'
         SET MESSAGE_TEXT = 'Lỗi: mã khóa học không tồn tại!';
     ELSE
