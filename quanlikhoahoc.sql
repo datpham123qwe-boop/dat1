@@ -1,9 +1,10 @@
 
+
 DROP DATABASE IF EXISTS QuanLyKhoaHoc; 
 CREATE DATABASE QuanLyKhoaHoc;         
 USE QuanLyKhoaHoc;
+
 /* 2026-04-02 13:26:39 [2 ms] */ 
-USE QuanLyKhoaHoc;
 /* 2026-04-02 13:26:41 [28 ms] */ 
 CREATE TABLE KHOA_HOC(
     MaKH VARCHAR(20) PRIMARY KEY,
@@ -103,7 +104,7 @@ CREATE TABLE Luot_Bai_Lam(
     MaDe VARCHAR(20),
     MaLuot VARCHAR(20),
     MaNguoiLam VARCHAR(20),
-    Diem_So DECIMAL(4),
+    Diem_So DECIMAL(6,2),
     Ngay_Lam DATE,
     Thoi_Gian_Hoan_Thanh TIME,
     PRIMARY KEY(MaDe,MaLuot)
@@ -387,7 +388,8 @@ BEGIN
 END //
 DELIMITER ;
 
--- xoa khoa hoc
+
+--xoa khoa hoc
 DELIMITER //
 CREATE PROCEDURE p_xoakhoahoc(
     IN p_makh VARCHAR(20)
@@ -510,6 +512,7 @@ INSERT INTO Chi_Tiet_Bai_Lam (MaDe, MaLuot, STT, MaCH, Tinh_Dung_Sai, Phuong_An_
 ('D02', 'L02', '2', 'C02', 0, 'watch'),
 ('D01', 'L01', '1', 'C01', 1, 'Large');
 
+
 INSERT INTO Phuong_An_Chon (MaCH, Phuong_AN) VALUES
 ('C01', 'A'), ('C01', 'B'), ('C01', 'C'), ('C01', 'D'),
 ('C02', 'A'), ('C02', 'B'), ('C02', 'C'), ('C02', 'D');
@@ -605,3 +608,69 @@ SELECT fn_XepLoaiHocVien('ND05') AS XepLoai_ND05;
 
 -- Test 4: Mã không tồn tại hoặc chưa làm bài
 SELECT fn_XepLoaiHocVien('ND99') AS XepLoai_Loi;
+=======
+
+
+-- Trigger Nghiệp vụ
+CREATE TRIGGER themKhoaHocTrungLap
+ON BAO_GOM
+AFTER INSERT, UPDATE
+AS
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM inserted i
+        JOIN HOA_DON hd_moi ON i.MaHD = hd_moi.MaHD
+        JOIN HOA_DON hd_cu ON hd_moi.Ma_Khach_Hang = hd_cu.Ma_Khach_Hang
+        JOIN BAO_GOM bg_cu ON hd_cu.MaHD = bg_cu.MaHD
+        WHERE bg_cu.MaKH = i.MaKH
+            AND hd_moi.MaHD <> hd_cu.MaHD
+            AND hd_cu.TrangThai = 'Đã thanh toán'
+    )
+    BEGIN
+        RAISERROR('Bạn đã sỡ hữu khóa học này, không thể thêm nữa!', 16, 1)
+        ROLLBACK TRANSACTION
+    END
+END
+
+
+-- Trigger Thuộc tính dẫn xuất
+CREATE TRIGGER tinhtoanDiemTichLuy
+ON LUOT_LAM_BAI
+AFTER INSERT
+AS
+BEGIN
+    DECLARE @MaNguoiLam INT, @MaDe INT, @DiemMoi INT;
+    DECLARE @DiemCaoNhatCu INT;
+    DECLARE @ChenhLech INT;
+
+    DECLARE cur_Diem CURSOR FOR 
+        SELECT MaNguoiLam, MaDe, Diem_so FROM inserted;
+
+    OPEN cur_Diem;
+    FETCH NEXT FROM cur_Diem INTO @MaNguoiLam, @MaDe, @DiemMoi;
+
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        SELECT @DiemCaoNhatCu = MAX(Diem_so)
+        FROM LUOT_LAM_BAI
+        WHERE MaNguoiLam = @MaNguoiLam AND MaDe = @MaDe
+          AND MaLuot NOT IN (SELECT MaLuot FROM inserted);
+
+        SET @DiemCaoNhatCu = ISNULL(@DiemCaoNhatCu, 0);
+
+        IF @DiemMoi > @DiemCaoNhatCu
+        BEGIN
+            SET @ChenhLech = @DiemMoi - @DiemCaoNhatCu;
+
+            UPDATE HOC_VIEN
+            SET DiemTichLuy = DiemTichLuy + @ChenhLech
+            WHERE MaNguoiLam = @MaNguoiLam;
+        END
+
+        FETCH NEXT FROM cur_Diem INTO @MaNguoiLam, @MaDe, @DiemMoi;
+    END
+
+    CLOSE cur_Diem;
+    DEALLOCATE cur_Diem;
+END;
