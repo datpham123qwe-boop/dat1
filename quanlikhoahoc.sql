@@ -1,7 +1,10 @@
-DROP DATABASE IF EXISTS quanlykhoahoc;
-CREATE DATABASE IF NOT EXISTS QuanLyKhoaHoc;
-/* 2026-04-02 13:26:39 [2 ms] */ 
+
+
+DROP DATABASE IF EXISTS QuanLyKhoaHoc; 
+CREATE DATABASE QuanLyKhoaHoc;         
 USE QuanLyKhoaHoc;
+
+/* 2026-04-02 13:26:39 [2 ms] */ 
 /* 2026-04-02 13:26:41 [28 ms] */ 
 CREATE TABLE KHOA_HOC(
     MaKH VARCHAR(20) PRIMARY KEY,
@@ -181,7 +184,7 @@ CREATE TABLE BaoGom (
 
 
 
---them khoa ngoai
+-- them khoa ngoai
 ALTER TABLE KHOA_HOC
 ADD CONSTRAINT fk_khoahoc_gv
     Foreign Key (MaGV) REFERENCES Giang_Vien(MaGV)
@@ -385,6 +388,7 @@ BEGIN
 END //
 DELIMITER ;
 
+
 --xoa khoa hoc
 DELIMITER //
 CREATE PROCEDURE p_xoakhoahoc(
@@ -508,6 +512,103 @@ INSERT INTO Chi_Tiet_Bai_Lam (MaDe, MaLuot, STT, MaCH, Tinh_Dung_Sai, Phuong_An_
 ('D02', 'L02', '2', 'C02', 0, 'watch'),
 ('D01', 'L01', '1', 'C01', 1, 'Large');
 
+
+INSERT INTO Phuong_An_Chon (MaCH, Phuong_AN) VALUES
+('C01', 'A'), ('C01', 'B'), ('C01', 'C'), ('C01', 'D'),
+('C02', 'A'), ('C02', 'B'), ('C02', 'C'), ('C02', 'D');
+
+DELIMITER //
+CREATE FUNCTION fn_TinhDiemTrungBinh(p_MaHV VARCHAR(20))
+RETURNS FLOAT
+READS SQL DATA
+BEGIN
+    -- 1. Khai báo các biến lưu trữ
+    DECLARE v_Diem FLOAT;
+    DECLARE v_TongDiem FLOAT DEFAULT 0;
+    DECLARE v_SoLuot INT DEFAULT 0;
+    DECLARE v_DiemTB FLOAT DEFAULT NULL;
+    DECLARE done INT DEFAULT FALSE;
+
+    -- 2.Khai báo con trỏ (Cursor) lấy điểm của học viên
+    DECLARE cur_Diem CURSOR FOR 
+        SELECT Diem_So FROM Luot_Bai_Lam WHERE MaNguoiLam = p_MaHV;
+        
+    -- 3. Khai báo cờ hiệu để biết khi nào Cursor chạy hết dữ liệu
+    DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE;
+
+    -- 4. Kiểm tra tham số đầu vào (Học viên có tồn tại không)
+    IF NOT EXISTS (SELECT 1 FROM HOC_VIEN WHERE MaHV = p_MaHV) THEN
+        RETURN NULL;
+    END IF;
+
+    -- 5. Mở và duyệt Cursor (LOOP)
+    OPEN cur_Diem;
+    read_loop: LOOP
+        FETCH cur_Diem INTO v_Diem;
+        
+        -- Thoát vòng lặp nếu hết dữ liệu
+        IF done THEN
+            LEAVE read_loop;
+        END IF;
+        
+        -- Cộng dồn điểm và số lượt
+        SET v_TongDiem = v_TongDiem + v_Diem;
+        SET v_SoLuot = v_SoLuot + 1;
+    END LOOP;
+    CLOSE cur_Diem;
+
+    -- 6.Tính toán dữ liệu (Tránh lỗi chia cho 0)
+    IF v_SoLuot > 0 THEN
+        SET v_DiemTB = v_TongDiem / v_SoLuot;
+    END IF;
+
+    RETURN v_DiemTB;
+END //
+DELIMITER ;
+
+DELIMITER //
+CREATE FUNCTION fn_XepLoaiHocVien(p_MaHV VARCHAR(20))
+RETURNS VARCHAR(50)
+READS SQL DATA
+BEGIN
+    DECLARE v_DiemTB FLOAT;
+    DECLARE v_XepLoai VARCHAR(50);
+
+    -- 1.Lấy dữ liệu từ hàm khác
+    SET v_DiemTB = fn_TinhDiemTrungBinh(p_MaHV);
+
+    -- Xử lý trường hợp chưa thi bài nào
+    IF v_DiemTB IS NULL THEN
+        RETURN 'Chưa có dữ liệu làm bài';
+    END IF;
+
+    -- 2.Chứa câu lệnh IF để phân loại
+    IF v_DiemTB >= 8.5 THEN
+        SET v_XepLoai = 'Xuất Sắc';
+    ELSEIF v_DiemTB >= 7.0 THEN
+        SET v_XepLoai = 'Khá Giỏi';
+    ELSEIF v_DiemTB >= 5.0 THEN
+        SET v_XepLoai = 'Trung Bình';
+    ELSE
+        SET v_XepLoai = 'Cần Cố Gắng';
+    END IF;
+
+    RETURN v_XepLoai;
+END //
+DELIMITER ;
+
+-- Test 1: Học viên ND03 (Điểm 10.0 và 7.5 -> Trung bình 8.75 -> Xuất sắc)
+SELECT fn_XepLoaiHocVien('ND03') AS XepLoai_ND03;
+
+-- Test 2: Học viên ND04 (Điểm 8.0 và 9.0 -> Trung bình 8.5 -> Xuất sắc)
+SELECT fn_XepLoaiHocVien('ND04') AS XepLoai_ND04;
+
+-- Test 3: Học viên ND05 (Điểm TOEIC 650.0 -> Hàm IF đánh giá >= 8.5 -> Xuất Sắc)
+SELECT fn_XepLoaiHocVien('ND05') AS XepLoai_ND05;
+
+-- Test 4: Mã không tồn tại hoặc chưa làm bài
+SELECT fn_XepLoaiHocVien('ND99') AS XepLoai_Loi;
+=======
 
 
 -- Trigger Nghiệp vụ
