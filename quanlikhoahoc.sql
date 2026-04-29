@@ -597,6 +597,21 @@ BEGIN
 END //
 DELIMITER ;
 
+-- Thủ tục tìm kiếm khóa học theo tên hoặc khoảng giá
+DELIMITER //
+CREATE PROCEDURE sp_timkiemkhoahoc(
+    IN p_keyword VARCHAR(255),
+    IN p_gia_min DECIMAL(11),
+    IN p_gia_max DECIMAL(11)
+)
+BEGIN
+    SELECT * FROM KHOA_HOC
+    WHERE (p_keyword IS NULL OR Ten_Khoa_Hoc LIKE CONCAT('%', p_keyword, '%'))
+      AND (p_gia_min IS NULL OR Gia_Tien >= p_gia_min)
+      AND (p_gia_max IS NULL OR Gia_Tien <= p_gia_max);
+END //
+DELIMITER ;
+
 -- Test 1: Học viên ND03 (Điểm 10.0 và 7.5 -> Trung bình 8.75 -> Xuất sắc)
 SELECT fn_XepLoaiHocVien('ND03') AS XepLoai_ND03;
 

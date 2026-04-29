@@ -79,3 +79,20 @@ app.delete('/api/khoahoc/:id',async(req,res)=>{
 });
 
 app.listen(3000,()=>console.log('Server chay tai https://localhost:3000  ///http://127.0.0.1:3000/ '));
+
+// API tìm kiếm khóa học
+app.get('/api/khoahoc/search', async (req, res) => {
+    const { keyword } = req.query;
+    try {
+        const connection = await mysql.createConnection(dbconfig);
+        // Bạn có thể dùng SQL thuần hoặc gọi Procedure đã viết ở Câu 2.3
+        const [rows] = await connection.execute(
+            'SELECT * FROM KHOA_HOC WHERE Ten_Khoa_Hoc LIKE ? OR MaKH LIKE ?',
+            [`%${keyword}%`, `%${keyword}%`]
+        );
+        await connection.end();
+        res.json(rows);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});

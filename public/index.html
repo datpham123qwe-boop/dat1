@@ -6,6 +6,7 @@
         <link 
         href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" 
         rel="stylesheet">
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
     </head>
     <body class="container mt-5">
         <h2 class="mb-4">Hệ Thống Quản Lí Khóa Học</h2>
@@ -42,6 +43,17 @@
                 </div>
             </form>
         </div>
+        <div class="row mb-3 justify-content-end">
+            <div class="col-md-4">
+                <div class="input-group">
+                    <input type="text" id="keyword" class="form-control" placeholder="Tìm tên khóa học...">
+                    <button class="btn btn-info" type="button" onclick="searchCourses()">
+                        <i class="bi bi-search"></i> Tìm kiếm
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <table class="table table-bordered table-striped">
             <thead class="table-dark">
                 <tr>
@@ -137,6 +149,29 @@
                 document.getElementById('formtitle').innerText='Thêm Khóa Học Mới';
                 document.getElementById('btnSave').className='btn btn-primary';
             }
+            async function searchCourses() {
+            const kw = document.getElementById('keyword').value;
+            
+            // Gọi API search (đảm bảo api.js đã có route này)
+            const res = await fetch(`/api/khoahoc/search?keyword=${kw}`);
+            const data = await res.json();
+            
+            // Cập nhật lại tbody mà không cần load lại trang
+            const tbody = document.getElementById('listKhoaHoc');
+            tbody.innerHTML = data.map(kh => `
+                <tr>
+                    <td>${kh.MaKH}</td>
+                    <td>${kh.Ten_Khoa_Hoc}</td>
+                    <td>${Number(kh.Gia_Tien).toLocaleString()} đ</td>
+                    <td>${kh.MaGV || ''}</td>
+                    <td>
+                        <button class="btn btn-sm btn-warning" onclick="editCourse('${kh.MaKH}', '${kh.MaGV}', '${kh.Ten_Khoa_Hoc}', '${kh.Gia_Tien}')">Sửa</button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteCourse('${kh.MaKH}')">Xóa</button>
+                    </td>
+                </tr>
+            `).join('');
+            }
+            
             loadcourse();
         </script>
     </body>
