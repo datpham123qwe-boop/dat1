@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>Admin Dashboard | EduManage</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+    <style>
+        body { background-color: #f8f9fa; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding-top: 70px;}
+        .navbar-custom { background-color: #ffffff; box-shadow: 0 2px 10px rgba(0,0,0,0.05); height: 70px; }
+        
+        /* Banner & Avatar mang phong cách Admin */
+        .cover-photo { height: 180px; background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); border-radius: 0 0 10px 10px; width: 100%; object-fit: cover;}
+        .profile-header { text-align: center; margin-top: -60px; margin-bottom: 30px; }
+        .avatar { width: 120px; height: 120px; border-radius: 50%; border: 4px solid white; background-color: white; object-fit: cover; box-shadow: 0 4px 10px rgba(0,0,0,0.1);}
+        
+        /* Tabs */
+        .nav-tabs { border-bottom: 1px solid #dee2e6; justify-content: center; margin-bottom: 20px;}
+        .nav-tabs .nav-link { color: #6b7280; font-weight: 600; border: none; padding: 10px 20px; margin: 0 10px; cursor: pointer; transition: 0.3s;}
+        .nav-tabs .nav-link.active { color: #1e3a8a; border-bottom: 3px solid #1e3a8a; background: transparent; }
+        .nav-tabs .nav-link:hover { color: #1e3a8a; }
+
+        /* Cards & Tables */
+        .admin-card { background: white; border-radius: 12px; border: 0; box-shadow: 0 4px 12px rgba(0,0,0,0.05); padding: 25px; margin-bottom: 25px; }
+        .table-custom { border-collapse: separate; border-spacing: 0; }
+        .table-custom thead th { background-color: #f8f9fa; color: #495057; font-weight: 700; border-bottom: 2px solid #dee2e6; padding: 15px; border-top: none; }
+        .table-custom tbody td { vertical-align: middle; padding: 15px; border-bottom: 1px solid #f1f3f5; }
+        
+        /* Action Widgets */
+        .widget-card { cursor: pointer; transition: 0.3s; border: 1px solid #e2e8f0; border-radius: 12px;}
+        .widget-card:hover { transform: translateY(-5px); box-shadow: 0 8px 15px rgba(0,0,0,0.1); border-color: #1e3a8a;}
+    </style>
+</head>
+<body>
+    <!-- NAVBAR -->
+    <nav class="navbar navbar-expand-lg fixed-top navbar-custom">
+        <div class="container-fluid px-4">
+            <a class="navbar-brand fw-bold fs-4" href="/admin" style="color: #1e3a8a;"><i class="fa-solid fa-shield-halved me-2"></i>EduManage Admin</a>
+            <div class="collapse navbar-collapse justify-content-end">
+                <ul class="navbar-nav align-items-center">
+                    <li class="nav-item"><a class="nav-link text-primary fw-bold" href="/">← Ra trang chủ học viên</a></li>
+                    <li class="nav-item dropdown ms-3">
+                        <a class="nav-link text-dark dropdown-toggle" href="#" data-bs-toggle="dropdown">
+                            <img src="https://ui-avatars.com/api/?name=<%= user.Ho_Ten || 'Admin' %>&background=dc3545&color=fff&rounded=true&size=32" alt="Avatar">
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item text-danger" href="/logout"><i class="fa-solid fa-right-from-bracket me-1"></i> Đăng xuất</a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container" style="max-width: 1200px;">
+        <!-- Cover & Profile Header -->
+        <div class="cover-photo d-flex align-items-center justify-content-center text-white">
+            <!-- Dùng CSS gradient thay cho ảnh để tạo sự nghiêm túc của trang Admin -->
+        </div>
+        <div class="profile-header">
+            <img src="https://ui-avatars.com/api/?name=<%= user.Ho_Ten || 'Admin' %>&background=dc3545&color=fff&size=120" alt="Avatar" class="avatar">
+            <h3 class="fw-bold mt-2 mb-1"><%= user.Ho_Ten || 'Ban Quản Trị' %> <span class="badge bg-danger ms-2" style="font-size: 0.8rem; vertical-align: middle;"><i class="fa-solid fa-star me-1"></i>Administrator</span></h3>
+        </div>
+
+        <!-- TABS BỘ ĐIỀU KHIỂN -->
+        <ul class="nav nav-tabs" id="adminTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="manage-tab" data-bs-toggle="tab" data-bs-target="#manage-pane" type="button" role="tab"><i class="fa-solid fa-book-open me-2"></i>Quản lý Khóa học</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tools-tab" data-bs-toggle="tab" data-bs-target="#tools-pane" type="button" role="tab"><i class="fa-solid fa-chart-pie me-2"></i>Thống kê & Công cụ</button>
+            </li>
+        </ul>
+
+        <!-- NỘI DUNG TABS -->
+        <div class="tab-content mt-4 mb-5" id="adminTabsContent">
+            
+            <!-- ============================================== -->
+            <!-- TAB 1: QUẢN LÝ KHÓA HỌC (Thêm/Sửa & Danh sách) -->
+            <!-- ============================================== -->
+            <div class="tab-pane fade show active" id="manage-pane" role="tabpanel">
+                
+                <!-- Khu vực Form Thêm/Sửa -->
+                <div class="admin-card">
+                    <h5 class="mb-4 fw-bold text-primary border-bottom pb-3">
+                        <i class="fa-solid <%= editData ? 'fa-pen-to-square' : 'fa-plus-circle' %> me-2"></i>
+                        <%= editData ? 'Cập Nhật Khóa Học' : 'Thêm Khóa Học Mới' %>
+                    </h5>
+                    <form action="/luu-khoa-hoc" method="POST">
+                        <input type="hidden" name="isEdit" value="<%= editData ? 'true' : 'false' %>">
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-2">
+                                <label class="text-muted small fw-bold mb-1">Mã KH</label>
+                                <input type="text" name="makh" class="form-control" value="<%= editData ? editData.MaKH : '' %>" <%= editData ? 'readonly' : 'required' %>>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="text-muted small fw-bold mb-1">Mã GV</label>
+                                <input type="text" name="magv" class="form-control" value="<%= editData ? editData.MaGV : '' %>">
+                            </div>
+                            <div class="col-md-5">
+                                <label class="text-muted small fw-bold mb-1">Tên Khóa Học</label>
+                                <input type="text" name="tenkhoahoc" class="form-control" value="<%= editData ? editData.Ten_Khoa_Hoc : '' %>" required>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="text-muted small fw-bold mb-1">Giá Tiền (VNĐ)</label>
+                                <input type="number" name="giatien" class="form-control" value="<%= editData ? editData.Gia_Tien : '' %>" required>
+                            </div>
+                        </div>
+                        <div class="row g-3 mb-4">
+                            <div class="col-md-6">
+                                <label class="text-muted small fw-bold mb-1">Mô Tả</label>
+                                <textarea name="mota" class="form-control" rows="2"><%= editData ? editData.Mo_Ta : '' %></textarea>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="text-muted small fw-bold mb-1">Lộ Trình</label>
+                                <textarea name="lotrinh" class="form-control" rows="2"><%= editData ? editData.Lo_Trinh : '' %></textarea>
+                            </div>
+                        </div>
+                        <div class="d-flex gap-2">
+                            <button type="submit" class="btn btn-primary px-4"><i class="fa-solid fa-floppy-disk me-2"></i><%= editData ? 'Lưu Cập Nhật' : 'Xác Nhận Thêm' %></button>
+                            <% if (editData) { %> <a href="/admin" class="btn btn-light border">Hủy Sửa</a> <% } %>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Khu vực Danh sách & Tìm kiếm -->
+                <div class="admin-card">
+                    <div class="d-flex justify-content-between align-items-center border-bottom pb-3 mb-3">
+                        <h5 class="fw-bold m-0 text-dark"><i class="fa-solid fa-list me-2"></i>Danh sách Khóa học hiện hành</h5>
+                        <form action="/admin" method="GET" class="input-group" style="width: 350px;">
+                            <input type="text" name="keyword" class="form-control bg-light" placeholder="Tìm theo Mã, Tên KH, Tên GV..." value="<%= searchKeyword %>">
+                            <button class="btn btn-primary" type="submit"><i class="fa-solid fa-magnifying-glass"></i></button>
+                        </form>
+                    </div>
+                    
+                    <div class="table-responsive">
+                        <table class="table table-hover table-custom mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Mã KH</th>
+                                    <th>Giảng Viên</th>
+                                    <th>Tên Khóa Học</th>
+                                    <th>Giá Tiền</th>
+                                    <th class="text-center">Hành động</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <% if (courses.length > 0) { %>
+                                    <% courses.forEach(kh => { %>
+                                    <tr>
+                                        <td class="fw-bold text-primary"><%= kh.MaKH %></td>
+                                        <td><%= kh.MaGV || kh.Ten_Giang_Vien || '--' %></td>
+                                        <td class="fw-medium"><%= kh.Ten_Khoa_Hoc %></td>
+                                        <td><span class="badge bg-success bg-opacity-10 text-success fs-6"><%= Number(kh.Gia_Tien).toLocaleString() %> đ</span></td>
+                                        <td class="text-center">
+                                            <a href="/admin?edit=<%= kh.MaKH %>" class="btn btn-sm btn-outline-primary rounded-circle p-2 me-1" title="Sửa"><i class="fa-solid fa-pen"></i></a>
+                                            <!-- Nút Xóa gọi Modal Bootstrap -->
+                                            <button type="button" class="btn btn-sm btn-outline-danger rounded-circle p-2" title="Xóa" data-bs-toggle="modal" data-bs-target="#deleteModal" data-id="<%= kh.MaKH %>"><i class="fa-solid fa-trash"></i></button>
+                                        </td>
+                                    </tr>
+                                    <% }) %>
+                                <% } else { %>
+                                    <tr><td colspan="5" class="text-center py-5 text-muted"><i class="fa-regular fa-folder-open fs-1 mb-3 d-block opacity-50"></i>Không tìm thấy khóa học nào khớp với từ khóa.</td></tr>
+                                <% } %>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ============================================== -->
+            <!-- TAB 2: CÔNG CỤ QUẢN TRỊ (Thống kê & Tra cứu) -->
+            <!-- ============================================== -->
+            <div class="tab-pane fade" id="tools-pane" role="tabpanel">
+                <div class="row g-4 justify-content-center">
+                    
+                    <!-- Khối Thống kê doanh thu -->
+                    <div class="col-md-5">
+                        <div class="widget-card bg-white p-4 text-center h-100 shadow-sm" data-bs-toggle="modal" data-bs-target="#revenueModal">
+                            <div class="d-inline-flex align-items-center justify-content-center bg-success bg-opacity-10 text-success rounded-circle mb-3" style="width: 70px; height: 70px;">
+                                <i class="fa-solid fa-chart-line fs-2"></i>
+                            </div>
+                            <h5 class="fw-bold">Thống Kê Doanh Thu</h5>
+                            <p class="text-muted small">Báo cáo tổng doanh thu các khóa học dựa trên hóa đơn đã thanh toán. (Yêu cầu 2.3)</p>
+                            <button class="btn btn-outline-success mt-2 px-4 rounded-pill">Xem Báo Cáo</button>
+                        </div>
+                    </div>
+
+                    <!-- Khối Tra cứu Học lực -->
+                    <div class="col-md-5">
+                        <div class="widget-card bg-white p-4 text-center h-100 shadow-sm" data-bs-toggle="modal" data-bs-target="#studentModal">
+                            <div class="d-inline-flex align-items-center justify-content-center bg-warning bg-opacity-10 text-warning rounded-circle mb-3" style="width: 70px; height: 70px;">
+                                <i class="fa-solid fa-medal fs-2"></i>
+                            </div>
+                            <h5 class="fw-bold">Tra Cứu Học Lực</h5>
+                            <p class="text-muted small">Quy đổi điểm thi động theo hệ 10 và xếp loại học viên. (Yêu cầu 2.4)</p>
+                            <button class="btn btn-outline-warning mt-2 px-4 rounded-pill">Mở Công Cụ</button>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- ================= MODALS GIỮ NGUYÊN LOGIC ================= -->
+    
+    <!-- Modal Thống Kê Doanh Thu -->
+    <div class="modal fade" id="revenueModal" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-success text-white border-0">
+                    <h5 class="modal-title fw-bold"><i class="fa-solid fa-chart-pie me-2"></i>Thống kê Doanh thu Khóa học</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-0">
+                    <table class="table table-striped table-hover mb-0">
+                        <thead class="table-light">
+                            <tr><th>Mã KH</th><th>Tên Khóa Học</th><th class="text-end">Tổng Doanh Thu</th></tr>
+                        </thead>
+                        <tbody>
+                            <% revenueData.forEach(item => { %>
+                            <tr>
+                                <td class="fw-bold"><%= item.MaKH %></td>
+                                <td><%= item.Ten_Khoa_Hoc %></td>
+                                <td class="text-end text-success fw-bold"><%= Number(item.DoanhThu).toLocaleString() %> đ</td>
+                            </tr>
+                            <% }) %>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Modal Tra Cứu Học Lực -->
+    <div class="modal fade" id="studentModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-warning text-dark border-0">
+                    <h5 class="modal-title fw-bold"><i class="fa-solid fa-magnifying-glass me-2"></i>Hệ Thống Tra Cứu Xếp Loại</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <form action="/admin" method="GET" class="mb-4">
+                        <input type="hidden" name="showRank" value="true">
+                        <label class="form-label text-muted fw-bold small">Nhập mã học viên cần kiểm tra:</label>
+                        <div class="input-group">
+                            <span class="input-group-text bg-light"><i class="fa-solid fa-user"></i></span>
+                            <input type="text" name="mahv" class="form-control form-control-lg fs-6" placeholder="VD: ND03" value="<%= mahv %>" required>
+                            <button class="btn btn-warning fw-bold px-4" type="submit">Tra Cứu</button>
+                        </div>
+                    </form>
+                    <% if (showRank) { %>
+                    <div class="text-center p-4 bg-light rounded-3 border">
+                        <p class="text-muted mb-1">Kết quả xếp loại của học viên <strong><%= mahv %></strong></p>
+                        <h2 class="text-success fw-bold m-0"><%= rank || 'Chưa có dữ liệu' %></h2>
+                    </div>
+                    <% } %>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Xác Nhận Xóa -->
+    <div class="modal fade" id="deleteModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <form id="deleteForm" method="POST" action="">
+                    <div class="modal-header bg-danger text-white border-0">
+                        <h5 class="modal-title"><i class="fa-solid fa-triangle-exclamation me-2"></i>Xác nhận xóa khóa học</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body p-4 text-center">
+                        <div class="text-danger mb-3"><i class="fa-regular fa-circle-xmark" style="font-size: 60px;"></i></div>
+                        <h5>Bạn có chắc chắn muốn xóa khóa học <strong id="deleteCourseId" class="text-danger"></strong>?</h5>
+                        <p class="text-muted small mt-2 mb-0">Hành động này không thể hoàn tác. Nếu khóa học đã phát sinh hóa đơn, hệ thống sẽ tự động chặn theo Trigger CSDL.</p>
+                    </div>
+                    <div class="modal-footer bg-light border-0 justify-content-center py-3">
+                        <button type="button" class="btn btn-light px-4 border" data-bs-dismiss="modal">Hủy</button>
+                        <button type="submit" class="btn btn-danger px-4 shadow-sm">Xác nhận Xóa</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- SCRIPTS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            // 1. Nếu đang tra cứu học lực -> Tự động chuyển sang Tab "Công cụ", rồi bật Modal lên
+            <% if (showRank) { %> 
+                const toolsTab = new bootstrap.Tab(document.getElementById('tools-tab'));
+                toolsTab.show();
+                new bootstrap.Modal(document.getElementById('studentModal')).show(); 
+            <% } %>
+
+            // 2. Logic truyền ID động vào Modal Xóa
+            const deleteModal = document.getElementById('deleteModal');
+            if (deleteModal) {
+                deleteModal.addEventListener('show.bs.modal', function (event) {
+                    const button = event.relatedTarget; 
+                    const courseId = button.getAttribute('data-id'); 
+                    document.getElementById('deleteCourseId').textContent = courseId;
+                    document.getElementById('deleteForm').action = '/xoa-khoa-hoc/' + courseId;
+                });
+            }
+        });
+    </script>
+</body>
+</html>
