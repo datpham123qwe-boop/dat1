@@ -7,6 +7,7 @@ const app = express();
 
 // Cấu hình Express
 app.use(bodyParser.urlencoded({ extended: true }));
+app.use(express.json());
 app.use(express.static('public'));
 app.set('view engine', 'ejs');
 app.set('views', './views');
@@ -42,12 +43,22 @@ app.get('/register', (req, res) => res.render('register', { error: null }));
 
 app.post('/register', async (req, res) => {
     const { username, password, hoten, email, sdt, ngaysinh, gioitinh, duong, quan, city } = req.body;
+    if (sdt && !/^\d{10}$/.test(sdt)) {
+        return res.render('register', { error: 'Số điện thoại không hợp lệ. Vui lòng nhập đúng 10 chữ số!' });
+    }
     const connection = await pool.getConnection(); 
     try {
         await connection.beginTransaction();
 
-        // Tạo MaND ngẫu nhiên
-        const maND = 'ND' + Date.now().toString().slice(-6);
+        // TỰ ĐỘNG TĂNG MÃ NGƯỜI DÙNG (ND01, ND02...)
+        // Trích xuất phần số đằng sau chữ "ND", lấy số lớn nhất
+        const [idResult] = await connection.query("SELECT MAX(CAST(SUBSTRING(MaND, 3) AS UNSIGNED)) as maxId FROM NGUOI_DUNG WHERE MaND LIKE 'ND%'");
+        let nextId = 1;
+        if (idResult[0].maxId !== null) {
+            nextId = idResult[0].maxId + 1;
+        }
+        // Ép chuẩn định dạng 2 chữ số: 1 -> "ND01", 10 -> "ND10"
+        const maND = 'ND' + String(nextId).padStart(2, '0');
 
         // 1. Chèn vào bảng NGUOI_DUNG
         const sqlND = `
@@ -166,7 +177,7 @@ app.get('/dashboard', requireUser, async (req, res) => {
         const [profileRows] = await pool.query(sqlProfile, [maND]);
         const userProfile = profileRows[0];
 
-        // 2. GỌI HÀM CÂU 2.4: Lấy Điểm Trung Bình (Thang 10) và Xếp Loại
+        // 2. Lấy Điểm Trung Bình và Xếp Loại
         const sqlAcademic = `SELECT fn_TinhDiemTrungBinh(?) AS DiemTB, fn_XepLoaiHocVien(?) AS XepLoai`;
         const [academicRows] = await pool.query(sqlAcademic, [maND, maND]);
         const academicInfo = academicRows[0] || { DiemTB: null, XepLoai: 'Chưa có dữ liệu' };
@@ -180,11 +191,22 @@ app.get('/dashboard', requireUser, async (req, res) => {
         `;
         const [enrolledCourses] = await pool.query(sqlCourses, [maND]);
 
+        // 4. LẤY LỊCH SỬ CÁC BÀI THI ĐÃ LÀM (THÊM MỚI Ở ĐÂY)
+        const sqlHistory = `
+            SELECT bdt.Ten_De, lbl.Diem_So, lbl.Ngay_Lam, bdt.Thang_Diem_Toi_Da 
+            FROM Luot_Bai_Lam lbl
+            JOIN Bo_De_Thi bdt ON lbl.MaDe = bdt.MaDe
+            WHERE lbl.MaNguoiLam = ?
+            ORDER BY lbl.Ngay_Lam DESC, lbl.MaLuot DESC
+        `;
+        const [examHistory] = await pool.query(sqlHistory, [maND]);
+
         res.render('dashboard', { 
             user: req.session.user, 
             profile: userProfile,   
-            academic: academicInfo, // Truyền dữ liệu học lực chuẩn thang 10 ra view
-            enrolledCourses: enrolledCourses
+            academic: academicInfo, 
+            enrolledCourses: enrolledCourses,
+            examHistory: examHistory // <--- Truyền dữ liệu lịch sử ra EJS
         });
     } catch (error) {
         res.status(500).send("Lỗi Database: " + error.message);
@@ -195,7 +217,9 @@ app.get('/dashboard', requireUser, async (req, res) => {
 app.post('/cap-nhat-thong-tin', requireUser, async (req, res) => {
     const { hoten, email, sdt, gioitinh, ngaysinh, duong, quan, thanhpho } = req.body;
     const maND = req.session.user.MaND; // Lấy mã từ session để bảo mật, không lấy từ form
-    
+    if (sdt && !/^\d{10}$/.test(sdt)) {
+        return res.send(`<script>alert("Cập nhật thất bại: Số điện thoại phải có đúng 10 chữ số!"); window.location.href="/dashboard";</script>`);
+    }
     try {
         const sql = `
             UPDATE NGUOI_DUNG 
@@ -251,7 +275,8 @@ app.get('/admin', async (req, res) => {
             const [editResult] = await pool.query('SELECT * FROM KHOA_HOC WHERE MaKH = ?', [editId]);
             if (editResult.length > 0) editData = editResult[0];
         }
-
+const [exams] = await pool.query('SELECT * FROM Bo_De_Thi ORDER BY MaDe DESC');
+const [students] = await pool.query('SELECT h.MaHV, n.Ho_Ten, fn_XepLoaiHocVien(h.MaHV) AS XepLoai FROM HOC_VIEN h JOIN NGUOI_DUNG n ON h.MaHV = n.MaND');
         // Ném tất cả dữ liệu ra file admin.ejs
         res.render('admin', {
             user: req.session.user || { Ho_Ten: 'Ban Quản Trị' },
@@ -261,7 +286,9 @@ app.get('/admin', async (req, res) => {
             showRank: showRank,
             mahv: mahv,
             rank: rank,
-            editData: editData
+            editData: editData,
+            exams: exams,
+            students: students
         });
 
     } catch (error) {
@@ -437,7 +464,245 @@ app.get('/vao-hoc/:makh', requireUser, async (req, res) => {
         res.status(500).send("Lỗi Database: " + error.message);
     }
 });
+// ==========================================
+// 8. CHỨC NĂNG THI ONLINE & TÍNH ĐIỂM
+// ==========================================
 
+// 8.1. Hiển thị danh sách đề thi
+app.get('/de-thi', async (req, res) => {
+    try {
+        const [exams] = await pool.query('SELECT * FROM Bo_De_Thi');
+        
+        // --- XỬ LÝ ÉP KIỂU THỜI GIAN CHO TOÀN BỘ DANH SÁCH ---
+        exams.forEach(exam => {
+            let totalMinutes = 60; // Mặc định
+            if (exam.Tong_Thoi_Gian) {
+                if (typeof exam.Tong_Thoi_Gian === 'string') {
+                    const parts = exam.Tong_Thoi_Gian.split(':');
+                    totalMinutes = parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+                } else if (exam.Tong_Thoi_Gian instanceof Date) {
+                    totalMinutes = exam.Tong_Thoi_Gian.getUTCHours() * 60 + exam.Tong_Thoi_Gian.getUTCMinutes();
+                }
+            }
+            exam.Tong_Thoi_Gian = totalMinutes;
+        });
+
+        res.render('exams', { user: req.session.user || null, exams: exams });
+    } catch (error) { 
+        res.status(500).send("Lỗi: " + error.message); 
+    }
+});
+
+// 8.2. Vào phòng thi (Lấy câu hỏi và Phương án)
+app.get('/thi/:made', requireUser, async (req, res) => {
+    try {
+        const maDe = req.params.made;
+        const [examInfo] = await pool.query('SELECT * FROM Bo_De_Thi WHERE MaDe = ?', [maDe]);
+        if (examInfo.length === 0) return res.redirect('/de-thi');
+
+        // ======================================================
+        // FIX LỖI THỜI GIAN: Đổi "00:45:00" thành số phút (45)
+        // ======================================================
+        let timeData = examInfo[0].Tong_Thoi_Gian;
+        let totalMinutes = 60; // Mặc định nếu DB bị lỗi rỗng
+        
+        if (timeData) {
+            if (typeof timeData === 'string') {
+                const parts = timeData.split(':');
+                totalMinutes = parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+            } else if (timeData instanceof Date) {
+                totalMinutes = timeData.getUTCHours() * 60 + timeData.getUTCMinutes();
+            }
+        }
+        examInfo[0].Tong_Thoi_Gian = totalMinutes;
+        // ======================================================
+
+        const [questions] = await pool.query('SELECT MaCH, Noi_Dung, Dap_An FROM Cau_Hoi WHERE MaDe = ?', [maDe]);
+        
+        const [options] = await pool.query(`
+            SELECT pa.MaCH, pa.Phuong_AN 
+            FROM Phuong_An_Chon pa 
+            JOIN Cau_Hoi ch ON pa.MaCH = ch.MaCH 
+            WHERE ch.MaDe = ?
+        `, [maDe]);
+
+        questions.forEach(q => {
+            q.DanhSachPhuongAn = options.filter(opt => opt.MaCH === q.MaCH).map(opt => opt.Phuong_AN);
+        });
+
+        res.render('exam-taking', { user: req.session.user, exam: examInfo[0], questions: questions });
+    } catch (error) { 
+        res.status(500).send("Lỗi: " + error.message); 
+    }
+});
+
+// 8.3. Nộp bài, chấm điểm và lưu vào CSDL
+app.post('/nop-bai/:made', requireUser, async (req, res) => {
+    const maHV = req.session.user.MaND;
+    const maDe = req.params.made;
+    const answers = req.body; 
+    
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        const [correctAnswers] = await connection.query('SELECT MaCH, Dap_An FROM Cau_Hoi WHERE MaDe = ?', [maDe]);
+        const [examInfo] = await connection.query('SELECT Thang_Diem_Toi_Da FROM Bo_De_Thi WHERE MaDe = ?', [maDe]);
+        
+        const maxScore = examInfo[0]?.Thang_Diem_Toi_Da || 10;
+        let soCauDung = 0;
+        const tongSoCau = correctAnswers.length;
+        const maLuot = 'L' + Date.now().toString().slice(-6); 
+        let stt = 1;
+        const chiTietData = [];
+
+        correctAnswers.forEach(q => {
+            const dapAnCuaHocVien = answers[q.MaCH] || '';
+            const tinhDungSai = (dapAnCuaHocVien === q.Dap_An) ? 1 : 0;
+            if (tinhDungSai === 1) soCauDung++;
+            chiTietData.push([maDe, maLuot, String(stt++), q.MaCH, tinhDungSai, dapAnCuaHocVien]);
+        });
+
+        const diemSo = tongSoCau > 0 ? ((soCauDung / tongSoCau) * maxScore).toFixed(2) : 0;
+
+        await connection.query('INSERT INTO Luot_Bai_Lam (MaDe, MaLuot, MaNguoiLam, Diem_So, Ngay_Lam) VALUES (?, ?, ?, ?, CURDATE())', [maDe, maLuot, maHV, diemSo]);
+
+        if (chiTietData.length > 0) {
+            await connection.query('INSERT INTO Chi_Tiet_Bai_Lam (MaDe, MaLuot, STT, MaCH, Tinh_Dung_Sai, Phuong_An_Chon) VALUES ?', [chiTietData]);
+        }
+
+        await connection.commit();
+        res.json({ status: 'success', score: diemSo, correct: soCauDung, total: tongSoCau });
+
+    } catch (error) {
+        await connection.rollback();
+        res.json({ status: 'error', message: error.message });
+    } finally {
+        connection.release();
+    }
+});
+// ==========================================
+// 9. QUẢN TRỊ: TẠO, SỬA, XÓA ĐỀ THI (CÓ PHƯƠNG ÁN CHỌN)
+// ==========================================
+app.post('/admin/tao-de', requireUser, async (req, res) => {
+    if (req.session.user.Role !== 'ADMIN') return res.json({ status: 'error', message: 'Không có quyền truy cập!' });
+    const { tende, thoigian, thangdiem, questions } = req.body;
+    const maGV = req.session.user.MaND;
+    
+    let gio = Math.floor(thoigian / 60); let phut = thoigian % 60;
+    let timeStr = `${gio < 10 ? '0'+gio : gio}:${phut < 10 ? '0'+phut : phut}:00`;
+
+    const conn = await pool.getConnection();
+    try {
+        await conn.beginTransaction();
+
+        // TỰ ĐỘNG TĂNG MÃ ĐỀ THI (D01, D02...)
+        // Trích xuất phần số đằng sau chữ "D", lấy số lớn nhất
+        const [idResult] = await conn.query("SELECT MAX(CAST(SUBSTRING(MaDe, 2) AS UNSIGNED)) as maxId FROM Bo_De_Thi WHERE MaDe LIKE 'D%'");
+        let nextId = 1;
+        if (idResult[0].maxId !== null) {
+            nextId = idResult[0].maxId + 1;
+        }
+        const maDe = 'D' + String(nextId).padStart(2, '0');
+        await conn.query(`INSERT INTO Bo_De_Thi (MaDe, MaGV, Ten_De, Nam_Phat_Hanh, Tong_Thoi_Gian, Thang_Diem_Toi_Da) VALUES (?, ?, ?, CURDATE(), ?, ?)`, [maDe, maGV, tende, timeStr, thangdiem]);
+
+        if (questions && questions.length > 0) {
+            const questionData = []; const phuongAnData = [];
+            questions.forEach((q, index) => {
+                const maCH = maDe + 'C' + index;
+                questionData.push([maCH, maDe, q.noidung, 'Đang cập nhật', null, q.dapan]);
+                phuongAnData.push([maCH, 'A. ' + q.optA], [maCH, 'B. ' + q.optB], [maCH, 'C. ' + q.optC], [maCH, 'D. ' + q.optD]);
+            });
+            await conn.query(`INSERT INTO Cau_Hoi (MaCH, MaDe, Noi_Dung, Giai_Thich, File_Am_Thanh, Dap_An) VALUES ?`, [questionData]);
+            await conn.query(`INSERT INTO Phuong_An_Chon (MaCH, Phuong_AN) VALUES ?`, [phuongAnData]);
+        }
+        await conn.commit();
+        res.json({ status: 'success', message: 'Tạo đề thi thành công!', redirect: '/de-thi' });
+    } catch (error) { await conn.rollback(); res.json({ status: 'error', message: error.message }); } 
+    finally { conn.release(); }
+});
+
+app.post('/admin/xoa-de/:made', requireUser, async (req, res) => {
+    if (req.session.user.Role !== 'ADMIN') return res.json({ status: 'error' });
+    try {
+        await pool.query('DELETE FROM Phuong_An_Chon WHERE MaCH IN (SELECT MaCH FROM Cau_Hoi WHERE MaDe = ?)', [req.params.made]);
+        await pool.query('DELETE FROM Bo_De_Thi WHERE MaDe = ?', [req.params.made]);
+        res.json({ status: 'success', message: 'Đã xóa đề thi!' });
+    } catch (error) { res.json({ status: 'error', message: error.message }); }
+});
+
+app.post('/admin/sua-de/:made', requireUser, async (req, res) => {
+    if (req.session.user.Role !== 'ADMIN') return res.json({ status: 'error' });
+    const maDe = req.params.made; const { tende, thoigian, thangdiem, questions } = req.body;
+    let timeStr = `${Math.floor(thoigian/60).toString().padStart(2,'0')}:${(thoigian%60).toString().padStart(2,'0')}:00`;
+
+    const conn = await pool.getConnection();
+    try {
+        await conn.beginTransaction();
+        await conn.query(`UPDATE Bo_De_Thi SET Ten_De=?, Tong_Thoi_Gian=?, Thang_Diem_Toi_Da=? WHERE MaDe=?`, [tende, timeStr, thangdiem, maDe]);
+
+        await conn.query('DELETE FROM Phuong_An_Chon WHERE MaCH IN (SELECT MaCH FROM Cau_Hoi WHERE MaDe = ?)', [maDe]);
+        await conn.query('DELETE FROM Cau_Hoi WHERE MaDe = ?', [maDe]);
+
+        if (questions && questions.length > 0) {
+            const questionData = []; const phuongAnData = [];
+            questions.forEach((q, index) => {
+                const maCH = maDe + 'C' + index;
+                questionData.push([maCH, maDe, q.noidung, 'Đang cập nhật', null, q.dapan]);
+                phuongAnData.push([maCH, 'A. ' + q.optA], [maCH, 'B. ' + q.optB], [maCH, 'C. ' + q.optC], [maCH, 'D. ' + q.optD]);
+            });
+            await conn.query(`INSERT INTO Cau_Hoi (MaCH, MaDe, Noi_Dung, Giai_Thich, File_Am_Thanh, Dap_An) VALUES ?`, [questionData]);
+            await conn.query(`INSERT INTO Phuong_An_Chon (MaCH, Phuong_AN) VALUES ?`, [phuongAnData]);
+        }
+        await conn.commit();
+        res.json({ status: 'success', message: 'Cập nhật thành công!' });
+    } catch (error) { await conn.rollback(); res.json({ status: 'error', message: error.message }); } 
+    finally { conn.release(); }
+});
+
+app.get('/api/de-thi/:made', requireUser, async (req, res) => {
+    if (req.session.user.Role !== 'ADMIN') return res.status(403).json({ status: 'error', message: 'Forbidden' });
+    
+    try {
+        const maDe = req.params.made;
+        const [examResult] = await pool.query('SELECT * FROM Bo_De_Thi WHERE MaDe = ?', [maDe]);
+        if (examResult.length === 0) return res.json({ status: 'error', message: 'Không tìm thấy đề thi!' });
+        
+        const exam = examResult[0];
+        // Đã thêm ORDER BY để câu hỏi không bị xáo trộn
+        const [questions] = await pool.query('SELECT * FROM Cau_Hoi WHERE MaDe = ? ORDER BY MaCH ASC', [maDe]);
+        const [options] = await pool.query('SELECT pa.MaCH, pa.Phuong_AN FROM Phuong_An_Chon pa JOIN Cau_Hoi ch ON pa.MaCH = ch.MaCH WHERE ch.MaDe = ?', [maDe]);
+
+        // Trộn phương án A, B, C, D an toàn hơn
+        questions.forEach(q => {
+            const qOpts = options.filter(o => o.MaCH === q.MaCH);
+            q.A = (qOpts.length > 0 && qOpts[0]) ? qOpts[0].Phuong_AN.substring(3).trim() : ''; 
+            q.B = (qOpts.length > 1 && qOpts[1]) ? qOpts[1].Phuong_AN.substring(3).trim() : '';
+            q.C = (qOpts.length > 2 && qOpts[2]) ? qOpts[2].Phuong_AN.substring(3).trim() : '';
+            q.D = (qOpts.length > 3 && qOpts[3]) ? qOpts[3].Phuong_AN.substring(3).trim() : '';
+        });
+
+        // XỬ LÝ ÉP KIỂU THỜI GIAN (Khắc phục triệt để lỗi báo đỏ)
+        let timeString = '00:45:00'; 
+        if (exam.Tong_Thoi_Gian) {
+            if (typeof exam.Tong_Thoi_Gian === 'string') {
+                 timeString = exam.Tong_Thoi_Gian;
+            } else if (exam.Tong_Thoi_Gian instanceof Date) {
+                 const hours = String(exam.Tong_Thoi_Gian.getUTCHours()).padStart(2, '0');
+                 const minutes = String(exam.Tong_Thoi_Gian.getUTCMinutes()).padStart(2, '0');
+                 const seconds = String(exam.Tong_Thoi_Gian.getUTCSeconds()).padStart(2, '0');
+                 timeString = `${hours}:${minutes}:${seconds}`;
+            } else {
+                 timeString = exam.Tong_Thoi_Gian.toString();
+            }
+        }
+        exam.Tong_Thoi_Gian = timeString;
+
+        res.json({ status: 'success', exam: exam, questions: questions });
+    } catch (error) { 
+        res.json({ status: 'error', message: error.message }); 
+    }
+});
 // ==========================================
 // KHỞI ĐỘNG SERVER
 // ==========================================

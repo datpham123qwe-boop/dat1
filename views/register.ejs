@@ -28,7 +28,7 @@
                 <h6 class="text-primary border-bottom pb-2 mt-4">Thông tin cá nhân</h6>
                 <div class="col-md-6"><label class="form-label">Họ và Tên *</label><input type="text" name="hoten" class="form-control" required></div>
                 <div class="col-md-6"><label class="form-label">Email</label><input type="email" name="email" class="form-control"></div>
-                <div class="col-md-4"><label class="form-label">Số điện thoại</label><input type="text" name="sdt" class="form-control"></div>
+                <div class="col-md-4"><label class="form-label">Số điện thoại</label><input type="text" class="form-control" name="sdt" pattern="[0-9]{10}" maxlength="10" title="Vui lòng nhập đúng 10 chữ số" required></div>
                 <div class="col-md-4"><label class="form-label">Ngày sinh</label><input type="date" name="ngaysinh" class="form-control"></div>
                 <div class="col-md-4"><label class="form-label">Giới tính</label>
                     <select name="gioitinh" class="form-select"><option value="Nam">Nam</option><option value="Nữ">Nữ</option></select>

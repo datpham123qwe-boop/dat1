@@ -8,12 +8,12 @@ USE QuanLyKhoaHoc;
 
 CREATE TABLE NGUOI_DUNG (
   MaND VARCHAR(20) PRIMARY KEY,
-  Ten_Dang_Nhap VARCHAR(50) NOT NULL,
+  Ten_Dang_Nhap VARCHAR(50) NOT NULL UNIQUE,
   Mat_Khau VARCHAR(255) NOT NULL,
   Ho_Ten VARCHAR(50) NOT NULL,
-  Email VARCHAR(50),
-  So_Dien_Thoai VARCHAR(15),
-  Gioi_Tinh CHAR(3),
+  Email VARCHAR(50) CHECK (Email LIKE '%@%'),
+  So_Dien_Thoai VARCHAR(15) CHECK (So_Dien_Thoai REGEXP '^[0-9]{10}$'),
+  Gioi_Tinh CHAR(3) CHECK (Gioi_Tinh IN ('Nam', 'Nữ', 'Khác')),
   Ngay_Sinh DATE,
   Duong VARCHAR(100),
   Quan VARCHAR(50),
@@ -22,7 +22,7 @@ CREATE TABLE NGUOI_DUNG (
 
 CREATE TABLE HOC_VIEN (
   MaHV VARCHAR(20) PRIMARY KEY,
-  Diem_Tich_Luy INT DEFAULT 0
+  Diem_Tich_Luy INT DEFAULT 0 CHECK (Diem_Tich_Luy >= 0)
 );
 
 CREATE TABLE GIANG_VIEN (
@@ -36,7 +36,7 @@ CREATE TABLE KHOA_HOC(
     Ten_Khoa_Hoc VARCHAR(255) NOT NULL,
     Mo_Ta TEXT,
     Lo_Trinh TEXT,
-    Gia_Tien DECIMAL(11) NOT NULL
+    Gia_Tien DECIMAL(11) NOT NULL CHECK (Gia_Tien >= 0)
 );
 
 CREATE TABLE Bai_Hoc(
@@ -81,7 +81,7 @@ CREATE TABLE Cau_Hoi(
 
 CREATE TABLE Phuong_An_Chon(
     MaCH VARCHAR(20),
-    Phuong_AN VARCHAR(20),
+    Phuong_AN VARCHAR(255),
     PRIMARY KEY(MaCH,Phuong_An)
 );
 
@@ -97,14 +97,14 @@ CREATE TABLE Binh_Luan(
     MaBL VARCHAR(20) PRIMARY KEY,
     Ma_Nguoi_BL VARCHAR(20),
     Noi_Dung TEXT,
-    Thoi_Gian TIMESTAMP,
+    Thoi_Gian TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     Ma_Phan_Hoi VARCHAR(20)
 );
 
 CREATE TABLE Binh_Luan_Blog(
     MaBL VARCHAR(20) PRIMARY KEY,
     MaBlog VARCHAR(20),
-    Luot_Up_Vote DECIMAL(6)
+    Luot_Up_Vote INT DEFAULT 0
 );
 
 CREATE TABLE Binh_Luan_De_Thi(
@@ -124,7 +124,7 @@ CREATE TABLE Luot_Bai_Lam(
     MaDe VARCHAR(20),
     MaLuot VARCHAR(20),
     MaNguoiLam VARCHAR(20),
-    Diem_So DECIMAL(6,2),
+    Diem_So DECIMAL(6,2) CHECK (Diem_So >= 0),
     Ngay_Lam DATE,
     Thoi_Gian_Hoan_Thanh TIME,
     PRIMARY KEY(MaDe,MaLuot)
@@ -201,6 +201,73 @@ ALTER TABLE CoQuyen ADD CONSTRAINT fk_cq_kh FOREIGN KEY (MaKH) REFERENCES KHOA_H
 ALTER TABLE BaoGom ADD CONSTRAINT fk_bg_kh FOREIGN KEY (MaKH) REFERENCES KHOA_HOC(MaKH) ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE BaoGom ADD CONSTRAINT fk_bg_gh FOREIGN KEY (MaGH) REFERENCES GioHang(MaGH) ON DELETE CASCADE ON UPDATE CASCADE;
 
+DELIMITER //
+
+-- =========================================================
+-- HIỆN THỰC RÀNG BUỘC NGỮ NGHĨA BTL 1
+-- =========================================================
+
+-- [Ràng buộc 5]: Thời gian hoàn thành trong LUOT_BAI_LAM không được lớn hơn tổng thời gian của BO_DE_THI.
+CREATE TRIGGER trg_RB5_ThoiGianHoanThanh
+BEFORE INSERT ON Luot_Bai_Lam
+FOR EACH ROW
+BEGIN
+    DECLARE v_TongThoiGian TIME;
+    SELECT Tong_Thoi_Gian INTO v_TongThoiGian FROM Bo_De_Thi WHERE MaDe = NEW.MaDe;
+    
+    IF NEW.Thoi_Gian_Hoan_Thanh > v_TongThoiGian THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Lỗi Ràng buộc 5: Thời gian hoàn thành không được vượt quá tổng thời gian của đề thi!';
+    END IF;
+END //
+
+-- [Ràng buộc 7]: Trong CHI TIẾT BÀI LÀM, mã câu hỏi phải thuộc về đúng BỘ ĐỀ THI mà lượt làm bài đang thực hiện.
+CREATE TRIGGER trg_RB7_LogicCauHoiDeThi
+BEFORE INSERT ON Chi_Tiet_Bai_Lam
+FOR EACH ROW
+BEGIN
+    DECLARE v_TonTai INT;
+    SELECT COUNT(*) INTO v_TonTai FROM Cau_Hoi WHERE MaCH = NEW.MaCH AND MaDe = NEW.MaDe;
+    
+    IF v_TonTai = 0 THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Lỗi Ràng buộc 7: Câu hỏi này không thuộc bộ đề thi của lượt làm bài hiện tại!';
+    END IF;
+END //
+
+-- [Ràng buộc 8]: GIẢNG VIÊN không được phép tự mua HÓA ĐƠN đối với KHÓA HỌC do chính mình quản lý.
+CREATE TRIGGER trg_RB8_GiangVienKhongMuaKhoaCuaMinh
+BEFORE INSERT ON Chi_Tiet_Mua
+FOR EACH ROW
+BEGIN
+    DECLARE v_MaNguoiMua VARCHAR(20);
+    DECLARE v_MaGV_KhoaHoc VARCHAR(20);
+
+    -- Lấy mã người mua từ Hóa Đơn
+    SELECT Ma_Khach_Hang INTO v_MaNguoiMua FROM HOA_DON WHERE MaHD = NEW.MaHD;
+    -- Lấy mã giảng viên tạo khóa học
+    SELECT MaGV INTO v_MaGV_KhoaHoc FROM KHOA_HOC WHERE MaKH = NEW.MaKH;
+
+    IF v_MaNguoiMua = v_MaGV_KhoaHoc THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Lỗi Ràng buộc 8: Giảng viên không được phép tự mua khóa học do chính mình tạo ra!';
+    END IF;
+END //
+
+-- [Ràng buộc 10]: Bình luận con phải có thời gian đăng sau thời gian đăng của Bình luận cha.
+CREATE TRIGGER trg_RB10_ThoiGianBinhLuanDeQuy
+BEFORE INSERT ON Binh_Luan
+FOR EACH ROW
+BEGIN
+    DECLARE v_ThoiGianCha TIMESTAMP;
+    
+    -- Nếu đây là bình luận phản hồi (có mã cha)
+    IF NEW.Ma_Phan_Hoi IS NOT NULL THEN
+        SELECT Thoi_Gian INTO v_ThoiGianCha FROM Binh_Luan WHERE MaBL = NEW.Ma_Phan_Hoi;
+        IF NEW.Thoi_Gian < v_ThoiGianCha THEN
+            SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Lỗi Ràng buộc 10: Thời gian của bình luận phản hồi không được trước thời gian của bình luận gốc!';
+        END IF;
+    END IF;
+END //
+
+DELIMITER ;
 -- DỮ LIỆU MẪU ĐỂ TEST
 -- =================================================================
 -- PHẦN 1.2: DỮ LIỆU MẪU (ÍT NHẤT 5 DÒNG MỖI BẢNG)
@@ -212,16 +279,24 @@ INSERT INTO NGUOI_DUNG (MaND, Ten_Dang_Nhap, Mat_Khau, Ho_Ten, Email, Gioi_Tinh)
 ('ND02', 'ms_linh', '123', 'Nguyễn Thị Linh', 'linh@edu.vn', 'Nữ'),
 ('ND03', 'cuong_pro', '123', 'Lê Văn Cường', 'cuong@gmail.com', 'Nam'),
 ('ND04', 'lan_anh', '123', 'Trần Lan Anh', 'lananh@gmail.com', 'Nữ'),
-('ND05', 'bao_it', '123', 'Trần Hoàng Bảo', 'bao@gmail.com', 'Nam');
+('ND05', 'bao_it', '123', 'Trần Hoàng Bảo', 'bao@gmail.com', 'Nam'),
+('ND06', 'mr_david', '123', 'David Brown', 'david@edu.vn', 'Nam'),
+('ND07', 'ms_hoa', '123', 'Lê Thị Hoa', 'hoa@edu.vn', 'Nữ'),
+('ND08', 'mr_tuan', '123', 'Phạm Minh Tuấn', 'tuan@edu.vn', 'Nam'),
+('ND09', 'hv_an', '123', 'Nguyễn Bình An', 'an@gmail.com', 'Nam'),
+('ND10', 'hv_mai', '123', 'Trần Ngọc Mai', 'mai@gmail.com', 'Nữ');
 
 -- 2. GIANG_VIEN
 INSERT INTO GIANG_VIEN (MaGV, Trinh_Do) VALUES 
 ('ND01', 'IELTS 8.5'), 
-('ND02', 'Thạc sĩ Ngôn ngữ học');
+('ND02', 'Thạc sĩ Ngôn ngữ học'),
+('ND06', 'IELTS 8.0'), 
+('ND07', 'Tiến sĩ Giáo dục'), 
+('ND08', 'Cử nhân Sư phạm');
 
 -- 3. HOC_VIEN
 INSERT INTO HOC_VIEN (MaHV, Diem_Tich_Luy) VALUES 
-('ND03', 150), ('ND04', 200), ('ND05', 50);
+('ND03', 150), ('ND04', 200), ('ND05', 50), ('ND09', 0), ('ND10', 10);
 
 -- 4. KHOA_HOC
 INSERT INTO KHOA_HOC (MaKH, MaGV, Ten_Khoa_Hoc, Mo_Ta, Gia_Tien) VALUES
@@ -275,22 +350,41 @@ INSERT INTO BLOG (Ma_Blog, Ma_Nguoi_Viet, Chu_De, Noi_Dung_Blog) VALUES
 ('BL04', 'ND01', 'Tin tức', 'Lịch thi IELTS 2026...'),
 ('BL05', 'ND05', 'Giải trí', 'Học tiếng Anh qua bài hát...');
 
--- 11. Binh_Luan
+-- 11. Binh_Luan (Khai báo TẤT CẢ 15 bình luận vào bảng cha trước)
 INSERT INTO Binh_Luan (MaBL, Ma_Nguoi_BL, Noi_Dung) VALUES
+-- 5 Bình luận cho Blog
 ('C01', 'ND03', 'Bài viết rất hay!'),
 ('C02', 'ND04', 'Cảm ơn thầy ạ.'),
 ('C03', 'ND05', 'Cho em hỏi chút...'),
 ('C04', 'ND03', 'Đề này khó quá!'),
-('C05', 'ND04', 'Mình làm được 8.0 nè.');
+('C05', 'ND04', 'Mình làm được 8.0 nè.'),
 
--- 12. Binh_Luan_Blog (Nối các comment trên vào blog)
+-- 5 Bình luận cho Đề thi
+('BDT01', 'ND03', 'Đề này khó thật'), 
+('BDT02', 'ND04', 'Mình sai 5 câu'), 
+('BDT03', 'ND05', 'Có câu 2 đáp án sai'), 
+('BDT04', 'ND03', 'Đề vừa sức'), 
+('BDT05', 'ND04', 'Xin giải thích câu 4'),
+
+-- 5 Bình luận cho Bài học
+('BBH01', 'ND03', 'Thầy giảng dễ hiểu'), 
+('BBH02', 'ND04', 'Em không hiểu khúc 15:00'), 
+('BBH03', 'ND05', 'Bài này dài quá'), 
+('BBH04', 'ND03', 'Âm thanh hơi nhỏ'), 
+('BBH05', 'ND04', 'Tuyệt vời');
+
+-- 12. Chia dữ liệu về các bảng con
+-- Bảng con Blog
 INSERT INTO Binh_Luan_Blog (MaBL, MaBlog, Luot_Up_Vote) VALUES
-('C01', 'BL01', 10), 
-('C02', 'BL01', 5), 
-('C03', 'BL02', 2), 
-('C04', 'BL04', 15), 
-('C05', 'BL05', 0);
+('C01', 'BL01', 10), ('C02', 'BL01', 5), ('C03', 'BL02', 2), ('C04', 'BL04', 15), ('C05', 'BL05', 0);
 
+-- Bảng con Đề Thi
+INSERT INTO Binh_Luan_De_Thi (MaBL, MaDe, Muc_Do_Kho) VALUES
+('BDT01', 'D01', 8), ('BDT02', 'D01', 7), ('BDT03', 'D02', 9), ('BDT04', 'D03', 5), ('BDT05', 'D04', 6);
+
+-- Bảng con Bài Học
+INSERT INTO Binh_Luan_Bai_Hoc (MaBL, MaKH, MaBH) VALUES
+('BBH01', 'KH01', 'BH01'), ('BBH02', 'KH01', 'BH01'), ('BBH03', 'KH01', 'BH02'), ('BBH04', 'KH01', 'BH03'), ('BBH05', 'KH01', 'BH05');
 -- 13. Flash_Card
 INSERT INTO Flash_Card (MaKH, MaBH, MaFC, Tu_Vung, Mo_Ta) VALUES
 ('KH01', 'BH01', 'FC01', 'Analyze', 'Phân tích'),
@@ -311,6 +405,49 @@ INSERT INTO Cau_Hoi (MaCH, MaDe, Noi_Dung, Giai_Thich, Dap_An) VALUES
 ('CH03', 'D01', 'Câu 3 đúng không?', 'Dựa vào đoạn 3', 'C'),
 ('CH04', 'D01', 'Câu 4 chọn gì?', 'Dựa vào đoạn 4', 'D'),
 ('CH05', 'D01', 'Câu cuối cùng?', 'Dựa vào đoạn cuối', 'A');
+
+-- 16. Phuong_An_Chon (Thêm 4 phương án A, B, C, D cho 5 câu hỏi mẫu của đề D01)
+INSERT INTO Phuong_An_Chon (MaCH, Phuong_AN) VALUES
+-- Câu CH01 (Đáp án A)
+('CH01', 'A. Kỹ năng đọc hiểu văn bản'),
+('CH01', 'B. Kỹ năng nghe hiểu'),
+('CH01', 'C. Kỹ năng giao tiếp'),
+('CH01', 'D. Kỹ năng viết luận'),
+
+-- Câu CH02 (Đáp án B)
+('CH02', 'A. Chọn đáp án A'),
+('CH02', 'B. Chọn đáp án B theo đoạn 2'),
+('CH02', 'C. Chọn đáp án C'),
+('CH02', 'D. Chọn đáp án D'),
+
+-- Câu CH03 (Đáp án C)
+('CH03', 'A. Hoàn toàn sai'),
+('CH03', 'B. Không có thông tin (Not Given)'),
+('CH03', 'C. Đúng theo nội dung bài đọc'),
+('CH03', 'D. Ý kiến cá nhân của tác giả'),
+
+-- Câu CH04 (Đáp án D)
+('CH04', 'A. Tùy chọn số 1'),
+('CH04', 'B. Tùy chọn số 2'),
+('CH04', 'C. Tùy chọn số 3'),
+('CH04', 'D. Đây là đáp án chính xác nhất'),
+
+-- Câu CH05 (Đáp án A)
+('CH05', 'A. Tóm tắt lại toàn bộ bài viết'),
+('CH05', 'B. Mở ra một vấn đề mới'),
+('CH05', 'C. Phản bác lại đoạn 1'),
+('CH05', 'D. Không liên quan đến bài');
+
+INSERT INTO Chi_Tiet_Bai_Lam (MaDe, MaLuot, STT, MaCH, Tinh_Dung_Sai, Phuong_An_Chon) VALUES
+('D01', 'L01', '1', 'CH01', 1, 'A'), ('D01', 'L01', '2', 'CH02', 1, 'B'), ('D01', 'L01', '3', 'CH03', 0, 'A'), ('D01', 'L01', '4', 'CH04', 1, 'D'), ('D01', 'L01', '5', 'CH05', 0, 'C');
+
+-- 20. GioHang
+INSERT INTO GioHang (MaGH, Ngay_Tao) VALUES
+('ND03', '2026-01-01'), ('ND04', '2026-01-02'), ('ND05', '2026-01-03'), ('ND09', '2026-01-04'), ('ND10', '2026-01-05');
+
+-- 21. BaoGom
+INSERT INTO BaoGom (MaKH, MaGH) VALUES
+('KH01', 'ND03'), ('KH02', 'ND03'), ('KH03', 'ND04'), ('KH04', 'ND05'), ('KH05', 'ND09');
 -- =================================================================
 -- PHẦN 2: THỦ TỤC THÊM/SỬA/XÓA (CỦA ĐẠT - Câu 2.1)
 -- =================================================================
@@ -386,6 +523,7 @@ BEGIN
     LEFT JOIN NGUOI_DUNG n ON g.MaGV = n.MaND
     WHERE hd.Trang_Thai = p_TrangThai -- Sử dụng tham số trong WHERE
     GROUP BY k.MaKH, k.Ten_Khoa_Hoc, n.Ho_Ten
+    HAVING DoanhThu >= 0
     ORDER BY DoanhThu DESC;
 END //
 DELIMITER ;
@@ -497,28 +635,66 @@ BEGIN
     RETURN NULL;
 END //
 
+DELIMITER //
+
 -- ==============================================
--- 2. HÀM XẾP LOẠI HỌC VIÊN (CÓ ĐÍNH KÈM ĐIỂM)
+-- 2. HÀM XẾP LOẠI HỌC VIÊN (Sử dụng Cursor & Logic điểm cao nhất)
 -- ==============================================
 CREATE FUNCTION fn_XepLoaiHocVien(p_MaHV VARCHAR(20)) 
 RETURNS VARCHAR(50) 
 READS SQL DATA
 BEGIN
+    DECLARE v_DiemMax DECIMAL(6,2);
+    DECLARE v_ThangDiem DECIMAL(6,2);
+    DECLARE v_TongDiem DECIMAL(10,2) DEFAULT 0;
+    DECLARE v_SoMon INT DEFAULT 0;
     DECLARE v_DiemTB DECIMAL(4,2);
+    DECLARE done INT DEFAULT FALSE;
     
-    -- Lấy dữ liệu từ hàm tính toán phía trên
-    SET v_DiemTB = fn_TinhDiemTrungBinh(p_MaHV);
-    
-    IF v_DiemTB IS NULL THEN 
+    -- [Yêu cầu 2.4]: Con trỏ kết nối 2 bảng, lấy ĐIỂM CAO NHẤT của từng môn
+    DECLARE cur_XepLoai CURSOR FOR 
+        SELECT MAX(lbl.Diem_So), bdt.Thang_Diem_Toi_Da 
+        FROM Luot_Bai_Lam lbl
+        JOIN Bo_De_Thi bdt ON lbl.MaDe = bdt.MaDe
+        WHERE lbl.MaNguoiLam = p_MaHV
+        GROUP BY lbl.MaDe, bdt.Thang_Diem_Toi_Da;
+        
+    DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE;
+
+    -- [Yêu cầu 2.4]: Kiểm tra tham số đầu vào
+    IF NOT EXISTS (SELECT 1 FROM HOC_VIEN WHERE MaHV = p_MaHV) THEN 
         RETURN 'Chưa có dữ liệu'; 
     END IF;
-    
-    -- Xếp loại học lực
-    IF v_DiemTB >= 9.0 THEN RETURN CONCAT('Xuất Sắc (', v_DiemTB, '/10)');
-    ELSEIF v_DiemTB >= 8.0 THEN RETURN CONCAT('Giỏi (', v_DiemTB, '/10)');
-    ELSEIF v_DiemTB >= 7.0 THEN RETURN CONCAT('Khá (', v_DiemTB, '/10)');
-    ELSEIF v_DiemTB >= 5.0 THEN RETURN CONCAT('Trung Bình (', v_DiemTB, '/10)');
-    ELSE RETURN CONCAT('Cần Cố Gắng (', v_DiemTB, '/10)');
+
+    OPEN cur_XepLoai;
+    read_loop: LOOP
+        FETCH cur_XepLoai INTO v_DiemMax, v_ThangDiem;
+        IF done THEN LEAVE read_loop; END IF;
+        
+        -- Logic bảo vệ dữ liệu trống
+        IF v_ThangDiem IS NULL OR v_ThangDiem = 0 THEN 
+            SET v_ThangDiem = 10; 
+        END IF;
+
+        -- Quy đổi điểm cao nhất ra thang 10 và cộng dồn
+        SET v_TongDiem = v_TongDiem + ((v_DiemMax / v_ThangDiem) * 10);
+        SET v_SoMon = v_SoMon + 1;
+    END LOOP;
+    CLOSE cur_XepLoai;
+
+    -- [Yêu cầu 2.4]: IF/ELSE để xếp loại và ghép chuỗi
+    IF v_SoMon > 0 THEN 
+        SET v_DiemTB = ROUND(v_TongDiem / v_SoMon, 2);
+        
+        -- Trả về đúng định dạng Web App đang cần
+        IF v_DiemTB >= 9.0 THEN RETURN CONCAT('Xuất Sắc (', v_DiemTB, '/10)');
+        ELSEIF v_DiemTB >= 8.0 THEN RETURN CONCAT('Giỏi (', v_DiemTB, '/10)');
+        ELSEIF v_DiemTB >= 7.0 THEN RETURN CONCAT('Khá (', v_DiemTB, '/10)');
+        ELSEIF v_DiemTB >= 5.0 THEN RETURN CONCAT('Trung Bình (', v_DiemTB, '/10)');
+        ELSE RETURN CONCAT('Cần Cố Gắng (', v_DiemTB, '/10)');
+        END IF;
+    ELSE
+        RETURN 'Chưa có dữ liệu';
     END IF;
 END //
 
